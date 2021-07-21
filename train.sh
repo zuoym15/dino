@@ -1,0 +1,1 @@
+CUDA_VISIBLE_DEVICES=0 python -m torch.distributed.launch --nproc_per_node=1 main_dino.py --arch vit_small --use_fast 1 --patch_size 8 --batch_size_per_gpu 32 --data_path /projects/katefgroup/datasets/detectron2_datasets/coco --output_dir ./logs

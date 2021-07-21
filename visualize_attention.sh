@@ -1,0 +1,1 @@
+python visualize_attention.py --pretrained_weights ./checkpoints/dino_deitsmall8_pretrain.pth

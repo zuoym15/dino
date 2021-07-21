@@ -238,6 +238,9 @@ def read_seg(seg_dir, factor, scale_size=[480]):
         _tw = scale_size[0]
     small_seg = np.array(seg.resize((_tw // factor, _th // factor), 0))
     small_seg = torch.from_numpy(small_seg.copy()).contiguous().float().unsqueeze(0)
+    print(seg_dir)
+    print(np.unique(np.asarray(seg)))
+    print('small_seg', np.unique(small_seg))
     return to_one_hot(small_seg), np.asarray(seg)
 
 

@@ -20,6 +20,7 @@ from functools import partial
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from utils import trunc_normal_
 
@@ -91,14 +92,75 @@ class Attention(nn.Module):
         x = self.proj_drop(x)
         return x, attn
 
+class FastAttention(nn.Module):
+    def __init__(self, dim, num_heads=8, qkv_bias=False, proj_drop=0.):
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        # self.scale = qk_scale or head_dim ** -0.5
+
+        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
+        # self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(dim, dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        self.eps = 1e-6
+
+    def forward(self, x):
+        # B, N, C = x.shape
+        # qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4) # kqv x B x num_heads x seq_len x head_dim
+        # q, k, v = qkv[0], qkv[1], qkv[2] # each: B x num_heads x seq_len x head_dim
+
+        # phi_q = F.elu(q) + 1.0 # introduce non-linearity
+        # phi_k = F.elu(k) + 1.0
+
+        # attn = phi_k.transpose(-2, -1) @ v # B x num_heads x head_dim x head_dim
+        # x = (phi_q @ attn).transpose(1, 2).reshape(B, N, C)  
+
+        # x = self.proj(x)
+        # x = self.proj_drop(x)
+        # return x, attn
+        B, N, C = x.shape
+        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
+        q, k, v = qkv[0], qkv[1], qkv[2] # each: B x num_heads x seq_len x head_dim
+
+        # queries: [N, L, H, D]
+        # keys: [N, S, H, D]
+        # values: [N, S, H, D]
+
+        Q = F.elu(q.transpose(1,2)) + 1.0 # B x seq_len x num_heads x head_dim
+        K = F.elu(k.transpose(1,2)) + 1.0 # B x seq_len x num_heads x head_dim
+        values = v.transpose(1,2) # B x seq_len x num_heads x head_dim
+
+        v_length = values.size(1)
+        values = values / v_length  # prevent fp16 overflow
+
+        KV = torch.einsum("nshd,nshm->nhmd", K, values)
+
+        # Compute the normalizer
+        Z = 1/(torch.einsum("nlhd,nhd->nlh", Q, K.sum(dim=1))+self.eps)
+
+        # Finally compute and return the new values
+        V = torch.einsum("nlhd,nhmd,nlh->nlhm", Q, KV, Z)
+        V = V.contiguous().reshape(B, N, C)*v_length # B x seq_len x num_heads x head_dim
+
+        V = self.proj(V)
+        V = self.proj_drop(V)
+
+        return V, None
+
 
 class Block(nn.Module):
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
-                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm):
+                 drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, use_fast=False):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(
-            dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
+        if use_fast:
+            self.attn = FastAttention(
+                dim, num_heads=num_heads, qkv_bias=qkv_bias, proj_drop=drop)
+        else: # normal attention
+            self.attn = Attention(
+                dim, num_heads=num_heads, qkv_bias=qkv_bias, qk_scale=qk_scale, attn_drop=attn_drop, proj_drop=drop)
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.norm2 = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
@@ -151,7 +213,7 @@ class VisionTransformer(nn.Module):
         self.blocks = nn.ModuleList([
             Block(
                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, qk_scale=qk_scale,
-                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer)
+                drop=drop_rate, attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, use_fast=kwargs['use_fast'] if 'use_fast' in kwargs else False)
             for i in range(depth)])
         self.norm = norm_layer(embed_dim)
 
