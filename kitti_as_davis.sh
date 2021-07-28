@@ -1,0 +1,1 @@
+python kitti_as_davis.py --data_path /projects/katefgroup/datasets/kitti_tracking/training

@@ -29,6 +29,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 from PIL import Image
 from torchvision import transforms
+import imageio
 
 import utils
 import vision_transformer as vits
@@ -238,9 +239,6 @@ def read_seg(seg_dir, factor, scale_size=[480]):
         _tw = scale_size[0]
     small_seg = np.array(seg.resize((_tw // factor, _th // factor), 0))
     small_seg = torch.from_numpy(small_seg.copy()).contiguous().float().unsqueeze(0)
-    print(seg_dir)
-    print(np.unique(np.asarray(seg)))
-    print('small_seg', np.unique(small_seg))
     return to_one_hot(small_seg), np.asarray(seg)
 
 
@@ -293,3 +291,23 @@ if __name__ == '__main__':
         seg_path = frame_list[0].replace("JPEGImages", "Annotations").replace("jpg", "png")
         first_seg, seg_ori = read_seg(seg_path, args.patch_size)
         eval_video_tracking_davis(args, model, frame_list, video_dir, first_seg, seg_ori, color_palette)
+
+        # save a video
+        writer = imageio.get_writer(os.path.join(args.output_dir, video_dir.split('/')[-1], '%s.mp4' % video_dir.split('/')[-1]), fps=5)
+        for i, frame_path in enumerate(frame_list):
+            raw_im = imageio.imread(frame_path) # e.g. /projects/katefgroup/datasets/kitti_tracking/training/image_02/0001/000000.png
+            # raw_im = cv2.resize(raw_im, (1248, 352))
+            seg = imageio.imread(os.path.join(args.output_dir, video_dir.split('/')[-1], os.path.basename(frame_path.replace("jpg", "png"))))
+            # seg = cv2.resize(seg, (1248, 352))
+            if len(seg.shape) == 2:
+                seg = np.repeat(seg[..., None], 3, axis=-1)
+
+            cat_im = np.concatenate((raw_im, seg[..., 0:3]), axis=0)
+            # cat_im = cv2.putText(cat_im, 'mIoU: %.1f' % (100.*mious[i]), (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2, cv2.LINE_AA)
+
+            writer.append_data(cat_im)
+
+        writer.close()
+
+        
+
