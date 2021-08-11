@@ -1,0 +1,1 @@
+python eval_video_segmentation.py --data_path /projects/katefgroup/datasets/cater/as_davis/ --output_dir ./results_cater --pretrained_weights ./checkpoints/dino_deitsmall8_pretrain.pth --patch_size 8
